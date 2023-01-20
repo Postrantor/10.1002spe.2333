@@ -1,0 +1,164 @@
+
+# 0. SUMMARY
+
+> ＃0。摘要
+
+
+In the theory of real-time scheduling, tasks are described by mathematical variables, which are used in analytical models in order to prove schedulability of the system. On real-time Linux, tasks are computer programs, and Linux developers try to lower the latencies caused by the Linux kernel, trying to achieve faster response for the highest-priority task. Although both seek temporal correctness, they use different abstractions, which end up separating these efforts in two different worlds, making it hard for the Linux practitioners to understand and apply the formally proved models to the Linux kernel and for theoretical researchers to apply the restrictions imposed by Linux for the theoretical models. This paper traces a parallel between the theory of response-time analysis and the abstractions used in the Linux kernel. The contribution of this paper is threefold. We first identify the PREEMPT RT Linux kernel mechanisms that impact the timing of real-time tasks and map these impacts to the main abstractions used by the real-time scheduling theory. Then, we describe a customized trace tool, based on the existing trace infrastructure of the Linux kernel, that allows the measurement of the delays associated with the main abstractions of the real-time scheduling theory. Finally, we use this customized trace tool to characterize the timing lines resulting from the behavior of the PREEMPT RT Linux kernel. Copyright © 2015 John Wiley & Sons, Ltd.
+
+> 在实时调度理论中，任务由数学变量描述，这些变量用于分析模型，以证明系统的调度性。在实时Linux上，任务是计算机程序，Linux开发人员试图降低由Linux内核引起的潜伏期，以实现最高优先级任务的更快响应。尽管两者都寻求时间正确，但他们使用不同的抽象，最终将这些努力分开在两个不同的世界中，这使Linux从业者很难理解并将正式证明的模型应用于Linux内核，并使理论研究人员适用于实施的限制。由Linux用于理论模型。本文追踪响应时间分析理论和Linux内核中使用的抽象之间的相似之处。本文的贡献是三倍。我们首先确定影响实时任务时机的RT Linux内核机制，并将这些影响映射到实时调度理论所使用的主要抽象。然后，我们根据Linux内核的现有跟踪基础架构来描述一种定制的痕量工具，该工具允许测量与实时调度理论的主要抽象相关的延迟。最后，我们使用此自定义的跟踪工具来表征由RT Linux内核行为产生的定时线。版权所有©2015 John Wiley＆Sons，Ltd。
+
+
+KEY WORDS: real time; response-time analysis; Linux; PREEMPT RT; trace; Ftrace
+
+> 关键词：实时；响应时间分析；Linux;抢占RT；痕迹;ftrace
+
+
+# 1. INTRODUCTION
+
+> ＃1.简介
+
+
+In recent years, Linux has gained several characteristics of a real-time operating system, and it has been used as such in both production systems [1](#_bookmark32), [2](#_bookmark33) and research projects [3](#_bookmark34), [4](#_bookmark35). Various realtime features have been added to the Linux kernel by several different groups. Some of them seek greater predictability for the kernel execution, as is the case of the project PREEMPT RT [5](#_bookmark36), which is an initiative of the kernel developers. Others implement real-time scheduling algorithms and mutual exclusion policies in the Linux kernel, as is the case of projects imus$RT$ [3](#_bookmark34) and SCHED_DEADLINE [4](#_bookmark35), which are both initiatives of the academic world. These initiatives were responsible for giving Linux both the ability to meet timing requirements such as tight response times [6](#_bookmark37) and the capacity of scheduling tasks using state-of-the-art algorithms from the real-time scheduling theory [7](#_bookmark38), [8](#_bookmark39).
+
+> 近年来，Linux已获得了实时操作系统的几个特征，并且在生产系统[1]（#_ bookmark32），[2]（#_ bookmark33）和研究项目中都已使用。＃_Bookmark34），[4]（#_ bookmark35）。几个不同的组已将各种实时功能添加到Linux内核中。他们中的一些人对内核执行寻求更大的可预测性，就像项目抢占RT [5]（#_ bookmark36）的情况一样，这是内核开发人员的倡议。其他人则在Linux内核中实施实时调度算法和相互排除策略，就像项目Imus $ rt $ [3]（#_ bookmark34）和Sched_deadline [4]（#_ bookmark35）一样世界。这些举措负责赋予Linux满足时间要求的能力，例如紧密响应时间[6]（#_ bookmark37），以及使用实时调度理论中最先进的算法进行调度任务的能力[7]（#_ bookmark38），[8]（#_ bookmark39）。
+
+
+The goal of the developers from the industry and the researchers from the academia is the same: to transform Linux into a real-time operating system. But there are conceptual differences that end up distancing the developments of academia and industry. These differences are reported both by the developers of Linux [9](#_bookmark40) and by researchers [10](#_bookmark41). These differences arise in part because both communities use different abstractions for the system components and different system validation methods.
+
+> 该行业的开发人员和学术界的研究人员的目标是相同的：将Linux转变为实时操作系统。但是，概念上的差异最终使学术界和行业的发展疏远了。Linux [9]（#_ bookmark40）的开发人员和研究人员[10]（#_ bookmark41）报告了这些差异。这些差异之所以出现，部分是因为两个社区对系统组件和不同的系统验证方法都使用不同的抽象。
+
+
+In the context of the Linux operating system, tasks are parts of computer programs with timing constraints and properties. The task concept used in the real-time scheduling theory usually corresponds to just a portion of all operating system tasks. Some of these constraints are specified by the application, such as the period of the execution of a certain function, and some properties are estimated, such as the time necessary to finish a certain function. The main objective of developing the PREEMPT RT patch was to start a task with the least possible delay [11](#_bookmark42), which is usually called system latency. The system latency measures the ability of the operating system to give control to the highest-priority task as quickly as possible [10](#_bookmark41). This objective is achieved through reducing the number and size of points where the system remains with interrupts and preemption disabled.
+
+> 在Linux操作系统的上下文中，任务是具有正时约束和属性的计算机程序的一部分。实时调度理论中使用的任务概念通常仅对应于所有操作系统任务的一部分。这些约束中的一些是由应用程序指定的，例如执行某个函数的周期，并估算了某些属性，例如完成特定功能所需的时间。开发抢先RT补丁的主要目标是以最小可能的延迟[11]（#_ bookmark42）启动任务，该任务通常称为系统延迟。系统延迟衡量操作系统尽快控制最高优先级任务的能力[10]（#_ bookmark41）。通过减少系统中断和预先抢先的点的点数和大小来实现此目标。
+
+
+In the real-time scheduling theory, a system is modeled as a set of _n_ tasks _τ_ D ¹*τ$1$, τ$2$, . . . , τ$n$*º, and each task has its timing behavior defined by a set of variables, such as its period _P_ , worstcase execution time _S_ , and relative deadline _D_. These tasks are scheduled on a set of _m_ processors _p_ D ¹*p$1$, p$2$, . . . , p$m$*º, and they may share _q_ resources _ơ_ D ¹*ơ$1$, ơ$2$, . . . , ơ$q$*º, which require mutual exclusion. In this context, the main goal of the analysis is to somehow assign time of processors from _p_ and resources from _ơ_ to tasks from _τ_ in order to finish all tasks from _τ_ while meeting the timing constraints of each task [12](#_bookmark43).
+
+> 在实时调度理论中，将一个系统建模为一组_n_任务_τ_d2τ$ 1 $，τ$ 2 $，。。。，τ$ n $*º，每个任务都有其定时行为由一组变量定义，例如其周期_p_，糟糕的执行时间_s_和相对截止日期_d_。这些任务安排在一组_m_处理器_p_ d 2*p $ 1 $，p $ 2 $，。。。，p $ m $*º，他们可以共享_q_ resources_ơ_d 2*$ 1 $，ơ$ 2 $，。。。，ơ$ q $*°，需要相互排除。在这种情况下，分析的主要目标是以某种方式分配从_p_分配处理器的时间，从_ơ_分配了从_τ_到任务的资源，以便从_τ_完成所有任务，同时满足每个任务的定时约束[12]（#_ bookmark43）。
+
+
+There would be important gains from the better integration between the real-time scheduling theory and the real-time Linux. For example, response-time analysis is a classical method used in the schedulability analysis of fixed-priority real-time systems [13](#_bookmark44), which is the case of Linux with the PREEMPT RT patch. By using the response-time analysis, it would be possible in principle to determine whether a task set is schedulable or not, provided that the worst-case execution times are known. The real-time scheduling theory allows analyses that go far beyond the simple latency measurement usually used as the main concern of the real-time Linux community.
+
+> 实时调度理论和实时Linux之间的更好整合将带来重要的收益。例如，响应时间分析是一种经典方法，用于固定优先实时系统的调度性分析[13]（#_ bookmark44），这就是Linux带有prement RT补丁的情况。通过使用响应时间分析，只要知道最坏的执行时间，就可以原则上确定任务集是否可计划。实时调度理论允许进行分析，这些分析远远超出了通常用作实时Linux社区的主要关注点的简单延迟测量。
+
+
+The reason why the real-time scheduling theory is not used in the context of real-time Linux is that the task models used in the scheduling theory are usually too simple, and their set of constraints and task dependencies among tasks does not reproduce the reality of real-time applications running on a Linux kernel. Despite the vast literature on real-time scheduling, few of these results are to be used by the Linux development community [9](#_bookmark40).
+
+> 实时调度理论在实时Linux的上下文中不使用实时调度理论的原因是，调度理论中使用的任务模型通常太简单了，并且任务之间的一系列约束和任务依赖性集也不会重现现实在Linux内核上运行的实时应用程序。尽管有关于实时时间表的大量文献，但Linux开发社区[9]（#_ bookmark40）很少使用这些结果。
+
+
+In this context, the contribution of this paper is threefold. We first identify PREEMPT RT Linux kernel mechanisms that impact the timing of real-time tasks and map these impacts to the main abstractions used by the real-time scheduling theory. Then, we describe a customized trace tool, based on the existing trace infrastructure of the Linux kernel, that allows the measurement of the delays associated with the main abstractions of the real-time scheduling theory. Finally, we use this customized trace tool to characterize the timing lines resulting from the behavior of the PREEMPT RT Linux kernel. We believe this characterization is an important step in the direction of creating correct task models of the PREEMPT RT Linux and development of analytical methods for its schedulability analysis.
+
+> 在这种情况下，本文的贡献是三倍。我们首先确定了影响实时任务时机的抢占RT Linux内核机制，并将这些影响映射到实时调度理论所使用的主要抽象。然后，我们根据Linux内核的现有跟踪基础架构来描述一种定制的痕量工具，该工具允许测量与实时调度理论的主要抽象相关的延迟。最后，我们使用此自定义的跟踪工具来表征由RT Linux内核行为产生的定时线。我们认为，这种表征是在创建Preement RT Linux的正确任务模型的方向上的重要一步，并开发了分析方法以进行计划分析。
+
+
+In this paper, we go beyond the simple measurement of latency, which is usually found in papers on real-time Linux. We identify the mechanisms of the PREEMPT RT Linux kernel that affect the timing of the tasks and how the tasks affect each other, through these mechanisms. With this, it is possible to list important aspects of the PREEMPT RT Linux where improvement is possible, regarding the response time of high-priority tasks and not just the latency.
+
+> 在本文中，我们超越了对潜伏期的简单测量，这通常在实时Linux的论文中找到。我们通过这些机制确定了影响任务时机以及任务如何相互影响的抢占RT Linux内核的机制。这样，就可以在高优先级任务的响应时间而不仅仅是延迟的响应时间方面列出可以改进的先发制人RT Linux的重要方面。
+
+
+Also, by observing the Linux from the perspective of the real-time scheduling theory, we can better understand the constraints that currently exist in the PREEMPT RT Linux kernel and contribute towards the development of new task models based on these constraints. This is a necessary step to be able to develop appropriate schedulability tests in the future.
+
+> 同样，通过从实时调度理论的角度观察Linux，我们可以更好地理解当前在RT Linux内核中存在的约束，并根据这些约束来开发新任务模型。这是能够在将来开发适当的可计划测试的必要步骤。
+
+
+The customized trace tool has also been proved very useful for analyzing the timeline of the execution of tasks on Linux. It can be used, for instance, by advanced users of Linux systems that require low latency to discover the source of the largest delays. It can assist them in the setup process, the fine tuning of the system, and the verification of new algorithms implemented in the kernel. It can also be used by researchers to understand the cause of high latency values, which sometimes cannot be explained and are just tagged as outliers.
+
+> 也已证明自定义的跟踪工具对于分析Linux上执行任务的时间表非常有用。例如，Linux系统的高级用户可以使用它，这些系统需要低延迟才能发现最大延迟的来源。它可以帮助他们进行设置过程，系统的微调以及内核中实现的新算法的验证。研究人员也可以使用它来理解高潜伏期值的原因，有时无法解释，仅将其标记为离群值。
+
+
+We believe that a better integration between academia and the developers and users of PREEMPT RT Linux is important because of the vast potential of use of this platform in supporting real-time applications. This integration will help Linux users to find the sources of latencies in their real-time applications, Linux developers to understand the abstractions used in the scheduling theory and identify them within the Linux code, and the theoretical researchers to understand the realities of the PREEMPT RT Linux kernel and create more appropriate task models and schedulability analyses for this context.
+
+> 我们认为，学术界与抢先RT Linux的开发人员和用户之间的更好集成非常重要，因为使用该平台在支持实时应用程序中具有巨大的潜力。该集成将帮助Linux用户在其实时应用程序中找到潜伏期的来源，Linux开发人员了解计划理论中使用的抽象并在Linux代码中识别它们，以及理论研究人员了解preempt RT的现实性Linux内核并为此上下文创建更合适的任务模型和计划分析。
+
+
+Section [2](#_bookmark0) presents the abstractions used in the response-time analysis, followed by the mapping between these abstractions and the Linux kernel abstractions in Section [3](#_bookmark3). Section [4](#_bookmark11) presents the customized trace tool, which is used to characterize Linux timeline in Section [5](#_bookmark12). The characterization of Linux execution is used to measure the timing properties of Linux tasks in Section [6](#_bookmark18), and a study case of the execution of the highest-priority task is shown in Section [7](#_bookmark23). Finally, Section [8](#_bookmark31) has our final comments, along with suggestions of future work.
+
+> [2]（#_ Bookmark0）节介绍了响应时间分析中使用的抽象，然后在[3]（#_ bookmark3）中进行这些抽象和Linux内核抽象之间的映射。[4]（#_ Bookmark11）节介绍了定制的跟踪工具，该工具用于表征[5]（#_ bookmark12）中的Linux时间轴。Linux执行的表征用于测量[6]（#_ bookmark18）中Linux任务的定时属性，并且在[7]（#_ bookmark23）节中显示了执行最高优先级任务的研究案例。最后，[8]（#_ bookmark31）节有我们的最终评论，以及未来工作的建议。
+
+
+# 2. ABSTRACTIONS OF RESPONSE-TIME ANALYSIS
+
+> ＃2.响应时间分析的抽象
+
+
+The main objective of this section is to introduce the abstractions and mathematical variables used
+
+> 本节的主要目的是介绍所使用的抽象和数学变量
+
+by the response-time analysis, for subsequent mapping of these abstractions to the functions and
+
+> 通过响应时间分析，将这些抽象映射到功能和
+
+abstractions used in the Linux kernel.
+
+> Linux内核中使用的抽象。
+
+
+In order to guarantee the timing correctness while executing real-time tasks, one has to know whether a given set of tasks and execution model will complete within their respective deadlines. There are several analytical methods to obtain this guarantee, depending on the execution model of the system. The Linux kernel is based on fixed priority, together with several mutual exclusion protocols. It is possible to verify the schedulability of a system that follows this model using the method of response-time analysis [14](#_bookmark45). Although the response-time method is only valid for uniprocessor systems, the choice to use this method was made for didactic purposes. Moreover it uses the common abstractions of the real-time literature.
+
+> 为了确保执行实时任务时的时序正确性，必须知道给定的一组任务和执行模型是否会在其各自的截止日期内完成。根据系统的执行模型，有几种获得此保证的分析方法。Linux内核基于固定优先级，以及几个相互排除方案。可以使用响应时间分析方法[14]（#_ bookmark45）验证遵循此模型的系统的计划性。尽管响应时间方法仅适用于单层系统系统，但选择使用此方法的选择是为教学目的。此外，它使用了实时文献的共同抽象。
+
+
+According to the response-time analysis method, a system is composed of a set _τ_ of _n_ tasks, which in turn are described by a set of algebraic variables related to its timing behavior. Each variable represents an abstraction used in the method. These variables and the abstractions that they represent are the following:
+
+> 根据响应时间分析方法，一个系统由_n_任务的集合_τ_组成，而该系统又由一组与其正时行为相关的代数变量来描述。每个变量代表该方法中使用的抽象。这些变量及其代表的抽象如下：
+
+
+_C_ : the worst-case execution time;
+
+> _c_：最差的执行时间；
+
+_P_ : the period of activation;
+
+> _p_：激活期；
+
+_D_: the relative deadline;
+
+> _d_：相对截止日期；
+
+_J_ : the maximum release jitter;
+
+> _j_：最大发行抖动；
+
+_B_: the worst-case blocking time;
+
+> _b_：最差的阻塞时间；
+
+_I_ : the interference;
+
+> _i_：干扰；
+
+_W_ : the busy period; and
+
+> _W_：繁忙的时期；和
+
+_R_: the maximum response time.
+
+> _r_：最大响应时间。
+
+
+The worst-case execution time _S_ is the maximum computation time of the task. The period _P_ is the activation period of a periodic task, and _D_ denotes the relative deadline of the task. The release jitter, denoted by variable _J_ , is the delay at the beginning of the execution of a task, caused by a lower-priority task.
+
+> 最差的执行时间_s_是任务的最大计算时间。_p_期间是定期任务的激活期，_d_表示任务的相对截止日期。由变量_J_表示的发行抖动是由较低优先级任务引起的任务执行开始时的延迟。
+
+
+_B_ is the worst-case blocking time. A blocking happens when a higher-priority task has its execution delayed by a lower-priority task, generally because the lower-priority task holds some resources required by the higher-priority task. Generally, these resources are managed through a mutual exclusion mechanism.
+
+> _b_是最糟糕的阻塞时间。当较高优先级任务的执行被较低优先级任务延迟时，就会发生阻碍，这通常是因为较低优先级任务保留了较高优先级任务所需的一些资源。通常，这些资源是通过相互排除机制来管理的。
+
+
+Based on these variables, the response-time method is used to define the value of _I_ , _W_ , and _R_, for each task of the system. The interference _I$i$_ of a task _τ$i$_ is the sum of all computation time of tasks in the set _hp(i)_ that was activated during the busy period of task _i_ , where _hp(i)_ is the set of tasks with priorities higher than _τ$i$_ :
+
+> 基于这些变量，响应时间方法用于为系统的每个任务定义_i_，_w_和_r_的值。干扰_i $ i $ _的任务_τ$ i $ _是集合_hp（i）_中所有计算时间的总和。优先级高于_τ$ i $ _：：：
+
+
+`$$`
+
+> $ $`
+
+![](./media/image1.png)
+<img src="./media/image8.png" style="width:0.32826in" />
+<img src="./media/image9.png" style="width:0.3275in;height:0.13812in" />
